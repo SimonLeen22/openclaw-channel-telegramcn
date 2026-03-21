@@ -1,0 +1,25 @@
+{
+  "name": "telegram-cn",
+  "version": "1.0.0",
+  "description": "OpenClaw Telegram channel plugin for China mainland — uses native Node.js https to bypass undici network issues",
+  "license": "MIT",
+  "keywords": [
+    "openclaw",
+    "telegram",
+    "channel",
+    "plugin",
+    "china",
+    "gfw",
+    "undici-bypass"
+  ],
+  "openclaw": {
+    "extensions": ["./src/index.ts"],
+    "channel": {
+      "id": "telegram-cn",
+      "label": "Telegram CN",
+      "selectionLabel": "Telegram CN (native https)",
+      "blurb": "Telegram Bot via native Node.js https — bypasses undici.",
+      "aliases": ["tgcn", "telegramcn"]
+    }
+  }
+}

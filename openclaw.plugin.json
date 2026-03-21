@@ -1,0 +1,7 @@
+{
+  "id": "telegram-cn",
+  "name": "Telegram CN",
+  "version": "1.0.0",
+  "description": "Telegram channel using native Node.js https — bypasses undici for China mainland deployments",
+  "channels": ["telegram-cn"]
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=SNI Transparent Proxy for Telegram API
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /opt/sni-proxy/sni-proxy.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sni-proxy
+
+[Install]
+WantedBy=multi-user.target
