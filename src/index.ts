@@ -304,39 +304,89 @@ function sendTgFile(chatId: number | string, filePath: string, replyTo?: number,
   });
 }
 
-/** 检测文本中嵌入的文件路径并发送 */
+/** 检测文本中的文件路径并发送 */
 async function trySendFilesFromText(chatId: number | string, text: string, replyTo?: number): Promise<{ sent: boolean; cleanedText: string }> {
   let cleanedText = text;
   let sent = false;
+  const sentPaths = new Set<string>();
 
-  // [file:路径] 格式
+  // 辅助：resolve 路径并检查文件存在
+  function resolvePath(p: string): string | null {
+    const trimmed = p.trim();
+    if (!trimmed) return null;
+    const resolved = trimmed.startsWith("~") ? path.join(process.env.HOME || "/root", trimmed.slice(1)) : trimmed;
+    // 安全检查：必须是绝对路径，有扩展名
+    if (!path.isAbsolute(resolved)) return null;
+    if (!path.extname(resolved)) return null;
+    try { if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) return resolved; } catch {}
+    return null;
+  }
+
+  // 辅助：发送文件
+  async function trySend(filePath: string, matchStr: string): Promise<boolean> {
+    if (sentPaths.has(filePath)) return true;
+    try {
+      await sendTgFile(chatId, filePath, replyTo);
+      log.info(`[tgcn] file sent: ${filePath}`);
+      sentPaths.add(filePath);
+      cleanedText = cleanedText.replace(matchStr, "").trim();
+      return true;
+    } catch (e: any) {
+      log.error(`[tgcn] file send failed: ${filePath} - ${e.message}`);
+      return false;
+    }
+  }
+
+  // 1. [file:路径] 标签格式
   const fileTagRegex = /\[file:([^\]]+)\]/g;
   let match;
   while ((match = fileTagRegex.exec(text)) !== null) {
-    const filePath = match[1].trim();
-    const resolved = filePath.startsWith("~") ? path.join(process.env.HOME || "/root", filePath.slice(1)) : filePath;
-    if (fs.existsSync(resolved)) {
-      try { await sendTgFile(chatId, resolved, replyTo); log.info(`[tgcn] file sent: ${resolved}`); sent = true; cleanedText = cleanedText.replace(match[0], "").trim(); }
-      catch (e: any) { log.error(`[tgcn] file send failed: ${resolved} - ${e.message}`); }
-    }
+    const resolved = resolvePath(match[1]);
+    if (resolved) { if (await trySend(resolved, match[0])) sent = true; }
   }
 
-  // 独立行绝对路径（有扩展名且文件存在）
+  // 2. 行内绝对路径提取（覆盖 "路径: /xxx"、"• /xxx"、"文件: /xxx" 等各种格式）
+  //    匹配任何位置出现的 /绝对路径.扩展名 或 ~/路径.扩展名
+  const inlinePathRegex = /((?:\/|~\/)[^\s<>"'`,;!?\[\](){}]+\.\w{1,10})/g;
   const lines = cleanedText.split("\n");
   const remainingLines: string[] = [];
+
   for (const line of lines) {
-    const trimmed = line.trim();
-    if (/^(\/|~\/)[^\s]+\.\w{1,10}$/.test(trimmed)) {
-      const resolved = trimmed.startsWith("~") ? path.join(process.env.HOME || "/root", trimmed.slice(1)) : trimmed;
-      if (fs.existsSync(resolved)) {
-        try { await sendTgFile(chatId, resolved, replyTo); log.info(`[tgcn] file sent (path): ${resolved}`); sent = true; continue; }
-        catch (e: any) { log.error(`[tgcn] file send failed: ${resolved} - ${e.message}`); }
-      }
+    const paths: string[] = [];
+    let lineMatch;
+    // 重置 lastIndex
+    inlinePathRegex.lastIndex = 0;
+    while ((lineMatch = inlinePathRegex.exec(line)) !== null) {
+      const resolved = resolvePath(lineMatch[1]);
+      if (resolved && !sentPaths.has(resolved)) paths.push(resolved);
     }
-    remainingLines.push(line);
+
+    if (paths.length > 0) {
+      let modifiedLine = line;
+      for (const p of paths) {
+        if (await trySend(p, "")) sent = true;
+      }
+      // 清理掉包含路径的行中的路径部分，如果行只剩标点/标签则整行移除
+      for (const p of paths) {
+        // 从行中移除路径及前面的 "路径:" "文件:" 等标签
+        modifiedLine = modifiedLine.replace(new RegExp(`[•\\-*]?\\s*(?:路径|文件|file|path)\\s*[:：]\\s*${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, "gi"), "").trim();
+        // 如果上面没匹配到（路径没有前缀标签），直接移除路径本身
+        modifiedLine = modifiedLine.replace(p, "").trim();
+      }
+      // 如果整行清理后只剩空白或标点符号，跳过整行
+      if (!modifiedLine || /^[•\-*\s:：。，]+$/.test(modifiedLine)) continue;
+      remainingLines.push(modifiedLine);
+    } else {
+      remainingLines.push(line);
+    }
   }
 
-  return { sent, cleanedText: remainingLines.join("\n").trim() };
+  cleanedText = remainingLines.join("\n").trim();
+
+  // 清理可能残留的空行
+  cleanedText = cleanedText.replace(/\n{3,}/g, "\n\n");
+
+  return { sent, cleanedText };
 }
 
 // ============================================================
